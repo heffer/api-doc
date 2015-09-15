@@ -30,6 +30,13 @@ case class Description(shortDescription: String, longDescription: Option[String]
   )
 }
 
+case class ResponseContent(contentTypes: List[String]) extends ApiDocElement {
+  def toJson = J(contentTypes)
+}
+
+case class Tags(tags: List[String]) extends ApiDocElement {
+  def toJson = J(tags)
+}
 
 object ParamType extends Enumeration{
   type Type = Value
@@ -124,7 +131,7 @@ case class Results(results: List[Result]) extends ApiDocElement{
   )
 }
 
-case class DataType(name: String, parameters: Parameters) extends ApiDocElement{
+case class DataType(name: String, parameters: Parameters, signature: String) extends ApiDocElement{
   def usedDataTypes: Set[String] = parameters.usedDataTypes
 
   def toJson = J.obj(
@@ -132,7 +139,7 @@ case class DataType(name: String, parameters: Parameters) extends ApiDocElement{
   )
 }
 
-case class ApiDocs(methodAndUri: MethodAndUri, description: Description, parameters: Option[Parameters], errors: Option[Errors], results: Option[Results]) extends ApiDocElement{
+case class ApiDocs(methodAndUri: MethodAndUri, description: Description, parameters: Option[Parameters], errors: Option[Errors], results: Option[Results], contentTypes: Option[ResponseContent], tags: Option[Tags]) extends ApiDocElement{
 
   def usedDataTypes: Set[String] =
     Set() ++
@@ -157,6 +164,8 @@ case class ApiDocs(methodAndUri: MethodAndUri, description: Description, paramet
     description.toJson ++
     addMaybe(parameters, "parameters") ++
     addMaybe(errors, "errors") ++
+    addMaybe(contentTypes, "produces") ++
+    addMaybe(tags, "tags") ++
     addMaybe(results)
 }
 
@@ -173,7 +182,7 @@ case class DataTypes(dataTypes: List[DataType]) extends ApiDocElement{
 
 
 
-object ApiDocParser{
+object ApiDocParser {
 
   private def getIndentLength(line: String) =
     line.prefixLength(_==' ')
@@ -299,10 +308,10 @@ object ApiDocParser{
     val rightParPos  = typetype.indexOf(')')
 
     if (leftParPos>=0 && rightParPos == -1)
-      throw new Exception(s"""Syntax error: Missing right paranthesis in "$parmName $typetypetype"""")
+      throw new Exception(s"""Syntax error: Missing right parenthesis in "$parmName $typetypetype"""")
 
     if (leftParPos == -1 && rightParPos>=0)
-      throw new Exception(s"""Syntax error: Missing left paranthesis in "$parmName $typetypetype"""")
+      throw new Exception(s"""Syntax error: Missing left parenthesis in "$parmName $typetypetype"""")
 
     val hasTypeOptions = leftParPos != -1
 
@@ -396,7 +405,7 @@ object ApiDocParser{
               isArray = typeInfo.isArray,
               enumArgs = typeInfo.enumArgs,
               required = true,
-            comment = Some(comment)
+              comment = Some(comment)
             )
           )
         })
@@ -412,7 +421,6 @@ object ApiDocParser{
      */
     private def parseDataType(line: String): DataType = {
       val parameters = getParameters()
-      val fieldNames = parameters.fieldNames
 
       val (dataTypeName, signature) = if (line.endsWith(":")) {
 
@@ -435,10 +443,10 @@ object ApiDocParser{
 
       if (signature != "!") {
         val (className, addedFields, removedFields) = parseScalaTypeSignature(signature)
-        ApiDocValidation.validateDataTypeFields(className, dataTypeName, fieldNames, addedFields, removedFields)
+        ApiDocValidation.validateDataTypeFields(className, dataTypeName, parameters.fields, addedFields, removedFields)
       }
 
-      DataType(dataTypeName, parameters)
+      DataType(dataTypeName, parameters, signature)
     }
 
     def replace_leading_underscores(line: String): String =
@@ -470,6 +478,18 @@ object ApiDocParser{
           shortDescription = elements.head,
           longDescription  = if (elements.length==1) None else Some(elements.tail.map(replace_leading_underscores).mkString("<br>"))
         )
+
+      else if (key.startsWith("RESPONSE ")) {
+        val contentTypes = key.drop(key.indexOf(' ')).trim.split(',').map(_.trim).toList
+
+        ResponseContent(contentTypes)
+      }
+
+      else if (key.startsWith("TAGS ")) {
+        val tags = key.drop(key.indexOf(' ')).trim.split(',').map(_.trim).toList
+
+        Tags(tags)
+      }
 
       else if (key=="PARAMETERS")
         getParameters()
@@ -559,7 +579,9 @@ object ApiDocParser{
       findElementOfType[Description](elements, "DESCRIPTION", apidocString),
       maybeFindElementOfType[Parameters](elements),
       maybeFindElementOfType[Errors](elements),
-      maybeFindElementOfType[Results](elements)
+      maybeFindElementOfType[Results](elements),
+      maybeFindElementOfType[ResponseContent](elements),
+      maybeFindElementOfType[Tags](elements)
     )
   }
 

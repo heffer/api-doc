@@ -67,16 +67,19 @@ object ApiDocValidation{
   def loadInnerClass(className: String): java.lang.Class[_] =
     loadInnerClass(null.asInstanceOf[java.lang.Class[_]], className, className.split('.').toList)
 
-
-  def validateDataTypeFields(className: String, dataTypeName: String, fields: Set[String], addedFields: Set[String], removedFields: Set[String]): Unit = {
-
-    val class_ = try{
+  def loadClassFor(className: String) = {
+    try{
       loadInnerClass(className)
     } catch {
       case e: java.lang.ClassNotFoundException =>
         //println("couldn't load class "+className+". Trying models instead")
         loadInnerClass("models."+className)
     }
+  }
+
+  def validateDataTypeFields(className: String, dataTypeName: String, fields: List[Field], addedFields: Set[String], removedFields: Set[String]): Unit = {
+
+    val class_ = loadClassFor(className)
 
     def getClassFieldNames(parameterAnnotations: List[Array[java.lang.annotation.Annotation]], fields: List[java.lang.reflect.Field]): List[String] = {
       if (fields.isEmpty)
@@ -116,8 +119,9 @@ object ApiDocValidation{
 
     val modifiedClassFields = classFields ++ addedFields -- removedFields
 
-    if ( fields != modifiedClassFields)
-      throw new MismatchFieldException(s"""While evaluating "${dataTypeName}": The ApiDoc datatype does not match the class '$className'. Mismatched fields: """+ ((fields | modifiedClassFields) -- (fields & modifiedClassFields)))
+    val fieldNames = fields.map(_.name).toSet
+    if ( fieldNames != modifiedClassFields)
+      throw new MismatchFieldException(s"""While evaluating "${dataTypeName}": The ApiDoc datatype does not match the class '$className'. Mismatched fields: """+ ((fieldNames | modifiedClassFields) -- (fieldNames & modifiedClassFields)))
   }
 
   def validate(apiDocs: ApiDocs) = {

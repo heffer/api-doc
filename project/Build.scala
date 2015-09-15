@@ -10,7 +10,7 @@ object ApplicationBuild extends Build {
 
   val appDependencies = Seq()
 
-  val main = Project(appName, file(".")).enablePlugins(play.PlayScala).settings(
+  val main = Project(appName, file(".")).enablePlugins(play.sbt.PlayScala).settings(
     version := appVersion,
     libraryDependencies ++= appDependencies,
 
@@ -19,7 +19,7 @@ object ApplicationBuild extends Build {
 
     publishMavenStyle := true,
 
-/*    
+/*
 
     publishTo := {
       val nexus = "https://repo.usit.uio.no/nexus/"
@@ -34,7 +34,7 @@ object ApplicationBuild extends Build {
       ms filter {
         case (file, toPath) => {
           //println("file: "+file+"\ntoPath: "+toPath+"\n")
-          val doit = toPath.startsWith("no/samordnaopptak") || toPath.contains("swagger-ui")
+          val doit = toPath.startsWith("no\\samordnaopptak") || toPath.startsWith("no/samordnaopptak") || toPath.contains("swagger-ui")
           if (doit){
             println("file: "+file+"\ntoPath: "+toPath+"\n")
           }

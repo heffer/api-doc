@@ -1,5 +1,6 @@
 package no.samordnaopptak.apidoc
 
+import no.samordnaopptak.apidoc.ApiDocValidation.MismatchFieldException
 import no.samordnaopptak.test.TestByAnnotation.Test
 import no.samordnaopptak.json._
 
@@ -183,6 +184,10 @@ object SwaggerUtil{
       method -> J.obj(
         "summary" -> apidoc.description.shortDescription,
         "description" -> apidoc.description.longDescription.getOrElse(""),
+        "produces" -> (apidoc.contentTypes match {
+          case None => J.arr()
+          case Some(content) => content.toJson
+        }),
         "parameters" -> (apidoc.parameters match {
           case None => J.arr()
           case Some(parameters) => JArray(
@@ -201,10 +206,13 @@ object SwaggerUtil{
                     "schema" -> getTypeFromField(field, addDescription=false)
                   )
               )
-            }).toList
+            })
           )
         }),
-        "tags" -> J.arr(createTagName(getTag(basePath, apidoc.methodAndUri.uri))),
+        "tags" -> (apidoc.tags match {
+          case None => J.arr(createTagName(getTag(basePath, apidoc.methodAndUri.uri)))
+          case Some(tags) => tags.toJson
+        }),
         "responses" -> getResponses(apidoc)
       )
     )
@@ -254,6 +262,33 @@ object SwaggerUtil{
      */
     if (undefinedTypes.size>0)
       throw new Exception(s"""${undefinedTypes.size} ApiDoc datatype(s) was/were undefined while evaluating "$basePath": """+undefinedTypes.toList.sorted.map(s => s""""$s"""").toString.drop(4))
+
+
+
+    val dataTypeToClass: String Map String = dataTypes.dataTypes.map(dt => dt.name -> dt.signature).toMap
+
+    def rewriteFieldType(canonicalFieldTypeName: String): String = canonicalFieldTypeName match {
+      case array if array endsWith "[]"             => rewriteFieldType(array dropRight 2)
+      case "java.lang.String"                       => "String"
+      case "int"                                    => "Integer"
+      case "boolean"                                => "Boolean"
+      case knownType
+        if (dataTypeToClass.isDefinedAt(knownType)) => dataTypeToClass(knownType)
+      case otherType                                => otherType
+    }
+
+    for {
+      dataType <- dataTypes.dataTypes
+      className = dataTypeToClass(dataType.name)
+      if (! className.startsWith("!"))
+      class_ = ApiDocValidation.loadClassFor(className)
+      field <- dataType.parameters.fields
+      classField = class_.getDeclaredField(field.name)
+      actual = rewriteFieldType(field.type_)
+      expected = rewriteFieldType(classField.getType.getCanonicalName)
+      if (actual != expected)
+      fieldName = classField.getName
+    } yield throw new MismatchFieldException(s"""While evaluating "${dataType.name}": The ApiDoc datatype does not match the class '$className'. Field '$fieldName' has unexpected type: $actual instead of $expected""")
   }
 
   def getEndpoint(basePath: String, path: String, apidocs: List[ApiDocs]): JObject = {
@@ -288,7 +323,7 @@ object SwaggerUtil{
       case (key, apiDoc) => J.obj(
         key -> getEndpoint(basePath, key, apiDoc)
       )
-    }).toList
+    })
 
     header ++
     J.obj(
