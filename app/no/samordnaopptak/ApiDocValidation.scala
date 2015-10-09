@@ -120,7 +120,7 @@ object ApiDocValidation{
     val modifiedClassFields = classFields ++ addedFields -- removedFields
 
     val fieldNames = fields.map(_.name).toSet
-    if ( fieldNames != modifiedClassFields)
+    if (fieldNames != modifiedClassFields)
       throw new MismatchFieldException(s"""While evaluating "${dataTypeName}": The ApiDoc datatype does not match the class '$className'. Mismatched fields: """+ ((fieldNames | modifiedClassFields) -- (fieldNames & modifiedClassFields)))
   }
 
@@ -143,3 +143,11 @@ object ApiDocValidation{
   }
 
 }
+
+// TODO
+/**
+ * - Preserve order of case class fields
+ * - Support for Option fields
+ * - Annotation may be missing "Array"
+ * - Validate method parameter types
+  */

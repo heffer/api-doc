@@ -4,6 +4,9 @@ import no.samordnaopptak.apidoc.ApiDocValidation.MismatchFieldException
 import no.samordnaopptak.test.TestByAnnotation.Test
 import no.samordnaopptak.json._
 
+import scala.collection.immutable.ListMap
+import scala.collection.mutable
+
 /*
  Generates swagger 2.0 data
  */
@@ -220,13 +223,19 @@ object SwaggerUtil{
 
   private def getDefinition(dataType: DataType): JObject = {
     val fields = dataType.parameters.fields
+    val fieldsInOrder: mutable.LinkedHashMap[String, JObject] = mutable.LinkedHashMap()
+    fields foreach { field =>
+      fieldsInOrder += ((field.name, getTypeFromField(field)))
+    }
+
+    val mappedFields = fields.map( field =>
+      field.name -> getTypeFromField(field)
+    ).toMap
 
     J.obj(
       dataType.name -> J.obj(
         "required"   -> fields.filter(_.required).map(_.name),
-        "properties" -> fields.map( field =>
-          field.name -> getTypeFromField(field)
-        ).toMap
+        "properties" -> mappedFields
       )
     )
   }
@@ -271,7 +280,9 @@ object SwaggerUtil{
       case array if array endsWith "[]"             => rewriteFieldType(array dropRight 2)
       case "java.lang.String"                       => "String"
       case "int"                                    => "Integer"
+      case "long"                                   => "Long"
       case "boolean"                                => "Boolean"
+      case "scala.Option"                           => "String" // FIXME consider other types, too
       case knownType
         if (dataTypeToClass.isDefinedAt(knownType)) => dataTypeToClass(knownType)
       case otherType                                => otherType

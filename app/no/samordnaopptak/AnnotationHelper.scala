@@ -1,7 +1,9 @@
 package no.samordnaopptak.apidoc
 
+import org.reflections.Reflections
+import org.reflections.scanners.SubTypesScanner
 import play.api.Play.current
-
+import scala.collection.JavaConverters._
 import no.samordnaopptak.test.TestByAnnotation.Test
 
 
@@ -95,6 +97,24 @@ object AnnotationHelper{
     rightAnnotation.asInstanceOf[no.samordnaopptak.apidoc.ApiDoc]
   }
 
+  def hasClassAnnotation(className: String): Boolean = try {
+    val class_ = play.api.Play.classloader.loadClass(className)
+
+    class_.getAnnotations.exists(_.isInstanceOf[no.samordnaopptak.apidoc.ApiDoc])
+  } catch {
+    case _: NoClassDefFoundError   => false
+    case _: ClassNotFoundException => false
+  }
+
+  def getClassAnnotation(className: String) = {
+    val cleanClassName = if (className.endsWith("[]")) className.dropRight(2) else className
+    val class_ = play.api.Play.classloader.loadClass(cleanClassName)
+
+    class_.getAnnotations().find {
+      _.isInstanceOf[no.samordnaopptak.apidoc.ApiDoc]
+    }.map(_.asInstanceOf[no.samordnaopptak.apidoc.ApiDoc])
+  }
+
   def expandIncludes(doc: String, alreadyIncluded: scala.collection.mutable.Set[String]): String = {
     val lines = doc.split("\n")
     lines.map { line =>
@@ -169,18 +189,55 @@ object AnnotationHelper{
     )
   }
 
-  def getApiDocsFromAnnotations(routeEntries: List[RouteEntry] = RoutesHelper.getRouteEntries()): List[String] = {
+  def getClassAnnotationDoc(className: String) = getClassAnnotation(className).map(_.doc).getOrElse("")
+
+  private def rewriteFieldType(canonicalFieldTypeName: String, knownFields: String Map String): String = canonicalFieldTypeName match {
+    case array if array endsWith "[]"                     => "Array " + rewriteFieldType(array dropRight 2, knownFields)
+    case optional if optional startsWith "scala.Option"   => "String(optional)" // FIXME consider other types, too
+    case "java.lang.String"                               => "String"
+    case "int"                                            => "Integer"
+    case "long"                                           => "Long"
+    case "boolean"                                        => "Boolean"
+    case knownType if (knownFields isDefinedAt knownType) => knownFields(knownType)
+    case otherType                                        => otherType
+  }
+
+  def expandClassAnnotationDoc(apiDoc: String, resultAliasesToClasses: String Map String) = {
+    val classesToResultAliases = resultAliasesToClasses map (_.swap)
+
+    if (apiDoc.split("\n").length == 1) {
+      val resultAlias = apiDoc.split(":")(0).trim
+
+      val className = resultAliasesToClasses(resultAlias)
+      val fields = play.api.Play.classloader.loadClass(className).getDeclaredFields.toSeq
+      val fieldDefinition = fields.map(f => (f.getName, rewriteFieldType(f.getType.getCanonicalName, classesToResultAliases))).toMap
+
+      s"    ${resultAlias}: ${className}\n" + fields.map(f => s"      ${f.getName}: ${fieldDefinition(f.getName)}").mkString("\n")
+    } else {
+      apiDoc
+    }
+  }
+
+  def getApiDocsFromAnnotations(routeEntries: List[RouteEntry] = RoutesHelper.getRouteEntries(), searchClassesInsidePackage: String = ""): List[String] = {
 
     val routeEntriesWithoutApiDocs = routeEntries.filter(routeEntry => hasMethodAnnotation(routeEntry.scalaClass, routeEntry.scalaMethod))
     validate(routeEntriesWithoutApiDocs)
 
     val alreadyIncluded = scala.collection.mutable.Set[String]()
+    val alreadyIncludedClasses = scala.collection.mutable.Set[String]()
 
-    val apiDocs = routeEntriesWithoutApiDocs.map(routeEntry =>
-      getMethodAnnotationDoc(routeEntry.scalaClass, routeEntry.scalaMethod, alreadyIncluded)
-    )
+    val reflections = new Reflections(searchClassesInsidePackage, new SubTypesScanner(false))
+    val classAnnotations = reflections.getAllTypes.asScala.filter(hasClassAnnotation).toSet
+    val resultAliasesToClasses = classAnnotations.map { className => getClassAnnotationDoc(className).trim.split(":")(0) -> className }.toMap
+
+    val apiDocs = routeEntriesWithoutApiDocs.map { routeEntry =>
+      val methodAnnotation = getMethodAnnotationDoc(routeEntry.scalaClass, routeEntry.scalaMethod, alreadyIncluded)
+      val classApiDocs = (classAnnotations -- alreadyIncludedClasses).map(getClassAnnotationDoc).map(expandClassAnnotationDoc(_, resultAliasesToClasses)).mkString("\n")
+      classAnnotations.foreach(alreadyIncludedClasses.add)
+
+      methodAnnotation + classApiDocs
+    }
 
     apiDocs
   }
-
 }
